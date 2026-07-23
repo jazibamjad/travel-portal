@@ -157,9 +157,15 @@ the corresponding tests and note the passing state at that point in history.*
 
 | Date | Area | Automated coverage | Manual pass? | Notes |
 |---|---|---|---|---|
-| _pending_ | — | — | — | Build not yet started as of this document's creation (2026-07-23). |
+| 2026-07-23 | Backend build | `dotnet build` — 0 errors, 0 warnings | — | Full entity model, all controllers (auth, directory, trips/meetings/materials, flights, team-plan/approval, KPIs/calendar, one-pagers, export/import), seed data, and initial EF Core migration all compile cleanly. |
+| 2026-07-23 | Frontend build | `tsc --noEmit` clean; `next build` succeeds (all routes prerender/compile) | — | Full route set (login, overview, calendar, planner + trip detail, flights, team-plan, directory, one-pager person/trip) builds with no type or build errors. |
+| 2026-07-23 | Dockerization | `docker compose up --build` run end-to-end | **Pass** | `db` healthy, `migrate` exited 0 (migrations + seed applied), `api`/`web` both up. Verified via direct requests to the running stack: `GET /health` OK; login with the seeded Coordinator account issues a valid session cookie; authenticated `GET /api/overview/kpis`, `/api/people`, `/api/trips` return correct data matching the seed; unauthenticated `/overview` correctly 307-redirects to `/login`. Two host-machine issues (not project bugs) had to be resolved first: Docker Desktop wasn't installed, and the first build attempt hit a disk-full `read-only file system` error on the containerd store (C: had ~18MB free) — resolved by freeing space and `docker builder prune`. One real project bug was caught and fixed by static review before this run: the `migrate` service's `command:` was being appended to the Dockerfile's `ENTRYPOINT`, double-invoking the app. |
+| 2026-07-23 | Backend unit tests (bonus, FR-28) | `Api.Tests` (xUnit): `DateMathTests` (5 cases — null/single-day/inclusive-range/reversed-dates/cross-month) + `PlanAggregationServiceTests` (2 cases — multi-entry day summing, ignoring dateless/cityless entries) | — | `dotnet test` → 7/7 passing. Covers the date-math and day-aggregation logic identified in §1 as highest-value to automate; integration/e2e tests and CI are not yet built. |
+| _pending_ | Functional test cases (TC-1…TC-42), through the browser UI | — | — | API/routing layer is verified via direct HTTP requests (see Dockerization row above), but no one has clicked through the actual UI yet — calendar drill-down, meeting builder, one-pager printing, vacation approval, etc. all still need a human pass through §4's checklist. |
 
 ---
 
-Next: implementation begins, with this file and `README.md` updated as each area is
-built and verified.
+**Immediate next step for whoever picks this up:** `docker compose up --build` is
+confirmed working — open http://localhost:3000, sign in with a seeded account, and work
+through the §4 regression checklist by hand (calendar drill-down, meeting builder,
+one-pager print output, vacation approval, etc.), recording results above.
