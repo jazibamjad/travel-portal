@@ -34,6 +34,17 @@ is a scratch tracking file for whoever (human or AI) picks this build up next.
   `PlanAggregationService.DaysByCity` — the date/day-count logic identified in the
   TEST_PLAN as highest-value to automate.
 - `dotnet build` and `dotnet test`: clean, 0 errors/warnings, 7/7 tests passing.
+- **2026-07-23, DI standardization pass**: `PasswordHasher` moved to `AddSingleton`
+  (genuinely stateless); `CityResolver` converted from a `static` utility class to an
+  ordinary constructor-injected `Scoped` service (matching every other class in
+  `Services/`), now injected into `TripsController`, `TeamPlanController`, and
+  `ExportImportController` instead of being called as a static method. Every other
+  service stays `Scoped` because it depends on `AppDbContext` (itself `Scoped`) — made
+  singleton would be the classic ASP.NET Core "captive dependency" bug. Documented in
+  `CLAUDE.md` and the `dotnet-backend`/`nextjs-frontend` skills so the reasoning doesn't
+  get re-litigated later. Frontend was reviewed for the equivalent pattern and found
+  already correct (single shared `api` client, single `QueryClient` instance via
+  `useState`) — nothing needed changing there, just documenting.
 
 ### Frontend (`frontend`, Next.js 16 + TypeScript + Tailwind + TanStack Query)
 - Auth-gated app shell (`proxy.ts` — Next 16's renamed `middleware.ts`), login page,

@@ -12,7 +12,7 @@ namespace Api.Controllers;
 [ApiController]
 [Route("api/trips")]
 [Authorize]
-public class TripsController(AppDbContext db, OnePagerService onePagerService) : ControllerBase
+public class TripsController(AppDbContext db, OnePagerService onePagerService, CityResolver cityResolver) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<TripDto>>> GetAll([FromQuery] string? q, [FromQuery] Guid? personId, [FromQuery] string? project)
@@ -231,7 +231,7 @@ public class TripsController(AppDbContext db, OnePagerService onePagerService) :
         return NoContent();
     }
 
-    private Task<City> GetOrCreateCityAsync(string label) => CityResolver.GetOrCreateAsync(db, label);
+    private Task<City> GetOrCreateCityAsync(string label) => cityResolver.GetOrCreateAsync(label);
 
     private async Task<Trip?> LoadTripAsync(Guid id) => await db.Trips
         .Include(t => t.DestinationCity).Include(t => t.Travellers)

@@ -66,16 +66,43 @@ npx tsc --noEmit         # typecheck only
 docker compose up --build   # db -> migrate+seed -> api (:8080) -> web (:3000)
 ```
 
+> **Rule: if the Docker stack is already running, rebuild the affected service(s) after
+> any code change, before calling the change done.** `docker compose up` (no `--build`)
+> serves whatever was baked into the image at the last build — it will silently keep
+> running stale code otherwise. Rebuild just what changed rather than the whole stack:
+> `docker compose up --build api migrate` after a backend change, `docker compose up
+> --build web` after a frontend change. Don't leave the running containers out of sync
+> with the source tree.
+
 ## Conventions worth knowing before editing
 
 - **Auth**: httpOnly cookie session (`mgh_session`), not a bearer JWT in browser storage
   — deliberate XSS-hardening choice, see TRD §2 and §5. Cookies are scoped by domain
   only (not port), so `localhost:8080` (API) and `localhost:3000` (web) share the cookie
   as long as both are addressed as `localhost`.
-- **Cities are resolved, not just referenced**: `CityResolver.GetOrCreateAsync` is the
-  one place that turns a free-text "City, Country" label into a `City` row (creating it
-  if new). Every controller that accepts a destination/place string goes through this —
-  don't duplicate the parsing logic elsewhere.
+- **Cities are resolved, not just referenced**: `CityResolver` (constructor-injected,
+  like every other service) is the one place that turns a free-text "City, Country"
+  label into a `City` row (creating it if new) — call `cityResolver.GetOrCreateAsync(label)`.
+  Every controller that accepts a destination/place string goes through this — don't
+  duplicate the parsing logic elsewhere.
+- **DI service lifetimes are chosen per service, not defaulted to one pattern**
+  (`Program.cs`): `PasswordHasher` is `Singleton` because it's genuinely stateless
+  (wraps static BCrypt calls, holds no fields). Everything else in `Services/` is
+  `Scoped` because it depends on `AppDbContext`, which EF Core registers `Scoped` — a
+  `Scoped` dependency can never be safely injected into a `Singleton` (the "captive
+  dependency" problem: the singleton would hold the first request's `DbContext` forever,
+  which is disposed at the end of that request, so every request after the first throws
+  `ObjectDisposedException`, and it's unsafe under concurrent requests regardless of
+  disposal timing). If you add a new service, ask whether it touches `AppDbContext`
+  before picking its lifetime — if it does, it's `Scoped`, full stop.
+- **No repository layer on top of EF Core, deliberately** — controllers and `Services/`
+  classes call `AppDbContext` directly; there's no `IRepository<T>`/`ITripRepository`
+  wrapping `DbSet<T>`. This isn't an oversight — see `docs/TRD.md` ADR-6 for the full
+  reasoning (short version: `DbContext`/`DbSet<T>` already *is* Repository +
+  Unit-of-Work, a repository interface with exactly one real implementation is ceremony
+  not abstraction, and it makes testing worse since mocked `DbContext`s don't behave
+  like the real provider). Don't introduce a generic repository layer without reading
+  that ADR and having a genuinely new reason it no longer applies.
 - **Contacts referenced by a Meeting can't be deleted** (`DirectoryController`,
   `DeleteBehavior.Restrict` in `AppDbContext`) — this is a deliberate deviation from the
   prototype (PRD §7) and has a matching test case (TC-30) in the TEST_PLAN.
@@ -92,6 +119,17 @@ docker compose up --build   # db -> migrate+seed -> api (:8080) -> web (:3000)
 - **Calendar range is dynamic, not hardcoded**: the frontend computes a rolling
   6-month window from "today" (`sixMonthWindow` in `calendar-utils.ts`) rather than a
   fixed `Jun–Dec 2026`, per the PRD's deliberate deviation from the prototype.
+- **Frontend has no DI container (by design), but it does have singletons where it
+  matters**: `src/lib/api.ts`'s `api` object is a plain ES module export — JS modules
+  are singletons by nature, so every page imports the same instance, and it's the
+  *only* thing allowed to call `fetch()` (grep for stray `fetch(` outside `api.ts` if
+  you're ever unsure — there should be none). `QueryClient` (`src/app/providers.tsx`)
+  is created exactly once via `useState(() => new QueryClient(...))`, **not** a
+  module-level `const` — that's deliberate: a true module-level singleton would leak
+  cached data across different users' requests during server-side rendering, while
+  `useState`'s initializer still only runs once per app load on the client. Don't
+  "simplify" either of these into something else without understanding why they're
+  built this way.
 
 ## Seeded accounts (see README.md for the full list)
 

@@ -4,11 +4,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Services;
 
-public static class CityResolver
+/// <summary>
+/// Finds a City by its "City, Country" label, creating it if it doesn't exist yet
+/// (mirrors the prototype's free-text destination field, which silently accepts new cities).
+/// Registered Scoped (see Program.cs) — it wraps AppDbContext, which is itself Scoped, so this
+/// can never be a Singleton without capturing a disposed/stale DbContext across requests.
+/// </summary>
+public class CityResolver(AppDbContext db)
 {
-    /// <summary>Finds a City by its "City, Country" label, creating it if it doesn't exist yet
-    /// (mirrors the prototype's free-text destination field, which silently accepts new cities).</summary>
-    public static async Task<City> GetOrCreateAsync(AppDbContext db, string label)
+    public async Task<City> GetOrCreateAsync(string label)
     {
         var trimmed = label.Trim();
         var existing = await db.Cities.FirstOrDefaultAsync(c => c.Label == trimmed);

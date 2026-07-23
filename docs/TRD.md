@@ -52,6 +52,7 @@ and from the client (interactive mutations, polling for near-real-time updates).
 | Consistency model | Polling (TanStack Query `refetchInterval`, default 5s on Calendar/Trips/Team Plan views) | Meets the assignment's explicit baseline ("polling is acceptable"). SignalR (bonus, §7 of PRD) upgrades this to push if time allows, behind the same query cache so the UI code barely changes. |
 | Directory/destination data | A single `City` table seeded from the prototype's full country/city list, with `Contact` rows only where the prototype's directory had entries | Preserves both prototype behaviors: a broad destination autocomplete (`DESTINATIONS`) and a narrower "has contacts" directory (`S.directory`) — modeled as one normalized table instead of two overlapping arrays. |
 | Containerization | Multi-stage Dockerfiles per service, orchestrated by `docker-compose.yml` at the repo root | A single monolithic container was considered for "simplicity" but breaks the assignment's explicit ask ("start the frontend, the API, and the database") and would hide the dockerized-DX signal the evaluation is checking for. |
+| Data access layering | Controllers/services use `AppDbContext` directly — **no** `IRepository<T>` / generic repository layer on top of EF Core | Deliberately rejected a classic n-layer (Controller → Service → Repository → ORM) split. See ADR-6 (§8) — `DbContext`/`DbSet<T>` already implement the Repository and Unit-of-Work patterns; wrapping them again adds indirection with only one real implementation and a worse testing story than testing against the ORM directly. |
 
 ## 3. Database Design
 
@@ -342,6 +343,65 @@ flowchart TB
 | ADR-3 | Normalize directory contacts as a `Contact` table referenced by `Meeting`, rather than free-text | Accepted — enables safe-delete and avoids duplicated free text |
 | ADR-4 | Polling by default, SignalR as an additive bonus | Accepted — meets the stated baseline; upgrade path doesn't require a rewrite |
 | ADR-5 | Single `City` table serves both the destination autocomplete and the contacts directory | Accepted — reflects that the prototype's two lists were always meant to overlap |
+| ADR-6 | No repository/n-layer abstraction on top of EF Core — controllers and services call `AppDbContext` directly | Accepted — see full rationale below |
+
+### ADR-6 detail: why this isn't a classic n-layer (Controller → Service → Repository → ORM) architecture
+
+**Context.** A common "textbook" ASP.NET Core layout adds a generic repository interface
+(`IRepository<T>` / `ITripRepository`, etc.) between the service layer and the ORM, so
+that "the database" is an injected, mockable abstraction. This project deliberately does
+**not** do that. Controllers and the `Services/` classes (`KpiService`,
+`CalendarService`, `OnePagerService`, `PlanAggregationService`, `CityResolver`) inject
+`AppDbContext` directly and query it with LINQ.
+
+**Decision.** Keep two tiers, not four: thin controllers/services directly over
+`AppDbContext`, with genuinely reusable or non-trivial logic (KPI aggregation, calendar
+merging, one-pager assembly, city resolution) pulled into named, constructor-injected
+`Services/` classes — but no generic repository layer wrapping `DbSet<T>` itself.
+
+**Rationale:**
+
+1. **EF Core's `DbContext` already *is* the Repository and Unit-of-Work pattern.**
+   `DbSet<T>` is a repository (a queryable, trackable collection per entity type);
+   `SaveChangesAsync()` is the unit-of-work commit. This is explicit in Microsoft's own
+   EF Core documentation and echoed by most respected .NET architects (e.g. Jimmy Bogard,
+   who has written specifically against this pattern). Adding `IRepository<Trip>` on top
+   is wrapping an abstraction in another abstraction that does the same job.
+2. **There is, and will only ever be, one implementation.** The value of an interface is
+   substitutability — a second implementation that can be swapped in. This project has
+   exactly one data store (PostgreSQL via EF Core) with no plan or requirement to swap
+   ORMs or databases. An interface with a single permanent implementation isn't
+   abstraction, it's ceremony: every repository interface would need to be updated in
+   lockstep with its one implementation forever, for no behavioral benefit.
+3. **It would make testing worse, not better.** The usual justification for a repository
+   interface is "so I can mock the database in unit tests." In practice, mocking
+   `DbContext`/`DbSet<T>` (or a hand-rolled repository interface standing in for them) is
+   notoriously unreliable — LINQ queries evaluated against a mock (e.g. an in-memory
+   `List<T>` wrapped in `Moq`) do not behave identically to the same query translated to
+   SQL by a real provider (ordering, `Include` behavior, and provider-specific translation
+   all differ). The approach this project actually uses instead — see the
+   `postgres-ef-core` and `dotnet-backend` skills — is to test pure logic with no database
+   dependency at all (`DateMathTests`, `PlanAggregationServiceTests`) and, if
+   integration-level DB tests are added later (`docs/TEST_PLAN.md` §1's "Should" tier),
+   run them against a real or Testcontainers-provisioned Postgres, not a mocked
+   repository. That gives higher-fidelity test results with less code than a repository
+   layer would.
+4. **The project already has real layering where it earns its keep.** Business logic
+   that's reused across endpoints, or complex enough to want isolation (day-count math,
+   merging trip and team-plan data into one calendar view, assembling a one-pager,
+   resolving/creating a `City` from free text) *is* pulled out into `Services/` classes
+   with their own DI lifetimes (see `CLAUDE.md`'s DI section and the `dotnet-backend`
+   skill). That's the layering boundary that matters here: not "is there a repository
+   between the service and the ORM," but "is logic that's used in more than one place, or
+   complex enough to name and test on its own, actually isolated." It is — a blanket
+   repository layer over *every* entity, most of which are simple CRUD with no shared
+   logic, would not add a comparable amount of real value.
+
+**Consequence.** If a future requirement genuinely needs swappable data access (e.g. a
+second storage backend, or a hard requirement to mock the data layer in controller-level
+unit tests), introduce a narrow interface for *that specific* need at that time — not a
+generic `IRepository<T>` for every entity up front. This is a YAGNI call, not a rejection
+of layering in general.
 
 ---
 

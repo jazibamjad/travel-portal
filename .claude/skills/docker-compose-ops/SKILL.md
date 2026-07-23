@@ -22,11 +22,21 @@ the topology diagram and reasoning. This skill is the operational/debugging comp
 ```bash
 docker compose up --build              # full stack, rebuilding images that changed
 docker compose up --build api migrate  # rebuild + restart just the backend after a code change
+docker compose up --build web          # rebuild + restart just the frontend after a code change
 docker compose logs -f api             # tail one service's logs
 docker compose down                    # stop everything, keep the data volume
 docker compose down -v                 # stop + wipe the Postgres volume (forces a clean reseed next `up`)
 docker compose exec db psql -U mgh -d mgh_travel   # get a psql shell into the running db
 ```
+
+**Standing rule: if the stack is already running when you finish a code change, rebuild
+the affected service(s) before considering the change done.** `docker compose up`
+without `--build` reuses whatever was already baked into the image — the running
+containers will silently keep serving old code otherwise, which is confusing to debug
+and easy to demo by accident. Backend change → `docker compose up --build api migrate`
+(the `migrate` one-shot needs rebuilding too if the schema/seed changed). Frontend
+change → `docker compose up --build web`. Only rebuild the whole stack
+(`docker compose up --build`) when `db`'s config changed or you're unsure what's stale.
 
 ## Debugging checklist, roughly in order
 

@@ -54,9 +54,62 @@ raw `DbUpdateException` leak to the client.
 
 ## City/destination handling
 
-Never parse a "City, Country" free-text string yourself. Call
-`CityResolver.GetOrCreateAsync(db, label)` — it's the single place that creates-or-finds
-a `City` row, used by trips, team-plan entries, and bulk-add endpoints alike.
+Never parse a "City, Country" free-text string yourself. Inject `CityResolver` (same
+pattern as every other service — constructor parameter, e.g.
+`public class TripsController(AppDbContext db, CityResolver cityResolver) : ControllerBase`)
+and call `cityResolver.GetOrCreateAsync(label)` — it's the single place that
+creates-or-finds a `City` row, used by trips, team-plan entries, and bulk-add endpoints
+alike. It used to be a `static` helper method taking `AppDbContext` as a parameter; it
+was converted to an ordinary injected service so every piece of business logic in this
+codebase follows the same DI pattern, with no static-utility exception.
+
+## Dependency injection & service lifetimes
+
+Everything in `Services/` and every controller uses constructor injection (C# 12
+primary constructors — `public class Foo(AppDbContext db, SomeService svc) : ...`).
+There is no static-utility-class escape hatch anywhere in `Services/` — if you're
+tempted to write a `static` helper method that touches the database or any injected
+dependency, make it an injected service instead (see the `CityResolver` note above for
+why this was actively enforced, not just a style preference).
+
+**Lifetime is chosen per service, based on what it depends on — not defaulted to one
+pattern everywhere:**
+
+- `AddSingleton<PasswordHasher>()` — the only Singleton in the app. Safe *because*
+  `PasswordHasher` is genuinely stateless: it holds no fields and every method is a
+  pass-through to static `BCrypt.Net.BCrypt` calls. One instance for the app's entire
+  lifetime, no per-request allocation.
+- `AddScoped<...>()` — everything else (`CityResolver`, `PlanAggregationService`,
+  `KpiService`, `CalendarService`, `OnePagerService`). All of these depend on
+  `AppDbContext`, which EF Core itself registers as `Scoped` (one instance per HTTP
+  request, disposed at the end of it).
+
+**Why not just make everything a Singleton for consistency/performance?** Because a
+`Scoped` dependency injected into a `Singleton` is the classic ASP.NET Core "captive
+dependency" bug: the Singleton is constructed once and holds onto whatever `AppDbContext`
+instance existed at that moment, forever. That `DbContext` gets disposed at the end of
+the very first request that used it — every request after that throws
+`ObjectDisposedException`, and even before that point, sharing one `DbContext` across
+concurrent requests is unsafe (EF Core's `DbContext` is not thread-safe). The rule of
+thumb for a new service in this codebase: **if it touches `AppDbContext` (directly or
+transitively through another Scoped service), it's `Scoped`. If it's genuinely stateless
+and has no dependencies that are themselves request-scoped, it can be `Singleton`.**
+`AddTransient` isn't used anywhere here — there's no service in this codebase that needs
+a fresh instance *within* a single request, which is the specific case Transient is for.
+
+## No repository layer — read this before adding one
+
+Controllers and `Services/` classes inject `AppDbContext` and query it directly with
+LINQ. There is **no** `IRepository<T>` / `ITripRepository` / generic repository
+abstraction anywhere in this codebase, and that's deliberate — full reasoning is
+`docs/TRD.md` ADR-6. The short version, so you don't accidentally "fix" this: EF Core's
+`DbContext`/`DbSet<T>` already implements Repository + Unit-of-Work; a hand-rolled
+repository interface on top of it has exactly one implementation ever (no
+substitutability benefit) and makes tests *worse* (mocked `DbContext`s don't behave like
+a real provider — this codebase tests pure logic with no DB dependency instead, per the
+Testing section above). If you're adding a new controller or service, follow the
+existing pattern — inject `AppDbContext` (or another `Services/` class) directly, don't
+introduce a repository interface for it.
 
 ## Auth
 

@@ -56,7 +56,17 @@ builder.Services.AddAuthorization(opt =>
     opt.AddPolicy("CoordinatorOrCeo", p => p.RequireRole("Coordinator", "Ceo"));
 });
 
-builder.Services.AddScoped<PasswordHasher>();
+// Lifetime is chosen per service, not defaulted to one pattern everywhere:
+// - PasswordHasher is stateless (wraps static BCrypt calls, holds no fields) -> Singleton,
+//   one instance for the app's lifetime, no per-request allocation.
+// - Everything else below depends on AppDbContext, which EF Core registers as Scoped
+//   (one instance per HTTP request). A Scoped dependency can never be safely injected into
+//   a Singleton (the "captive dependency" problem: the Singleton would hold the first
+//   request's DbContext forever, which is then disposed at the end of that request and
+//   throws ObjectDisposedException on every request after, and is unsafe under concurrent
+//   requests regardless). So these stay Scoped, matching the DbContext they wrap.
+builder.Services.AddSingleton<PasswordHasher>();
+builder.Services.AddScoped<CityResolver>();
 builder.Services.AddScoped<PlanAggregationService>();
 builder.Services.AddScoped<KpiService>();
 builder.Services.AddScoped<CalendarService>();

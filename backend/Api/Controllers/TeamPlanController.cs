@@ -11,7 +11,7 @@ namespace Api.Controllers;
 [ApiController]
 [Route("api/team-plan")]
 [Authorize]
-public class TeamPlanController(AppDbContext db) : ControllerBase
+public class TeamPlanController(AppDbContext db, CityResolver cityResolver) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<TeamPlanEntryDto>>> GetAll([FromQuery] Guid? personId)
@@ -31,7 +31,7 @@ public class TeamPlanController(AppDbContext db) : ControllerBase
         var personExists = await db.People.AnyAsync(p => p.Id == req.PersonId);
         if (!personExists) return BadRequest(new { error = "Unknown person" });
 
-        City? city = string.IsNullOrWhiteSpace(req.CityLabel) ? null : await CityResolver.GetOrCreateAsync(db, req.CityLabel);
+        City? city = string.IsNullOrWhiteSpace(req.CityLabel) ? null : await cityResolver.GetOrCreateAsync(req.CityLabel);
 
         var entry = new TeamPlanEntry
         {
@@ -57,7 +57,7 @@ public class TeamPlanController(AppDbContext db) : ControllerBase
         if (req.FromDate is not null && req.ToDate is not null && req.ToDate < req.FromDate)
             return BadRequest(new { error = "Return/To date can't be before the departure/From date" });
 
-        City? city = string.IsNullOrWhiteSpace(req.CityLabel) ? null : await CityResolver.GetOrCreateAsync(db, req.CityLabel);
+        City? city = string.IsNullOrWhiteSpace(req.CityLabel) ? null : await cityResolver.GetOrCreateAsync(req.CityLabel);
         var validPersonIds = await db.People.Where(p => req.PersonIds.Contains(p.Id)).Select(p => p.Id).ToListAsync();
 
         var created = new List<TeamPlanEntry>();
@@ -102,7 +102,7 @@ public class TeamPlanController(AppDbContext db) : ControllerBase
         }
         if (req.CityLabel is not null)
         {
-            var city = string.IsNullOrWhiteSpace(req.CityLabel) ? null : await CityResolver.GetOrCreateAsync(db, req.CityLabel);
+            var city = string.IsNullOrWhiteSpace(req.CityLabel) ? null : await cityResolver.GetOrCreateAsync(req.CityLabel);
             entry.CityId = city?.Id;
         }
 

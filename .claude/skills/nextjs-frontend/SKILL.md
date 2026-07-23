@@ -48,6 +48,27 @@ biggest gotchas already handled in this repo:
   range is a **rolling 6-month window from today**, not a hardcoded year — see
   `sixMonthWindow()`. Don't reintroduce a hardcoded `2026`/`Jun–Dec` anywhere.
 
+## Shared instances (no DI container, but singletons where it matters)
+
+React/Next.js has no IoC container, so there's no backend-style constructor injection
+here — but the two places that genuinely need exactly one shared instance are still
+built that way deliberately, and should stay that way:
+
+- **`src/lib/api.ts`'s `api` object** is a plain ES module export. JS modules are
+  singletons by nature (every importer gets the same object), which is why it's the
+  *only* place allowed to call `fetch()` — every page/component calls `api.get/post/
+  patch/put/delete` instead. If you're about to write `fetch(` anywhere else, stop and
+  add a method to `api.ts` instead; grep for stray `fetch(` outside `lib/api.ts` if
+  you're ever unsure whether this rule is still being followed.
+- **`QueryClient`** (`src/app/providers.tsx`) is created exactly once via
+  `useState(() => new QueryClient({...}))`, **not** `const queryClient = new
+  QueryClient()` at module scope. This is intentional, not an oversight: a true
+  module-level singleton would be shared across every user's server-rendered request in
+  Next.js, leaking one user's cached query data into another's response. `useState`'s
+  initializer function only runs once per component instance, which for a root-layout
+  provider is once per app load on the client — giving the "only one instance" property
+  without the cross-request leak. Don't "simplify" this to a module-level constant.
+
 ## Data fetching / polling
 
 TanStack Query's `QueryClient` (see `src/app/providers.tsx`) defaults every query to

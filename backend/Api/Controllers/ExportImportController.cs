@@ -11,7 +11,7 @@ namespace Api.Controllers;
 [ApiController]
 [Route("api")]
 [Authorize]
-public class ExportImportController(AppDbContext db) : ControllerBase
+public class ExportImportController(AppDbContext db, CityResolver cityResolver) : ControllerBase
 {
     [HttpGet("export")]
     public async Task<ActionResult<ExportBundle>> Export()
@@ -102,7 +102,7 @@ public class ExportImportController(AppDbContext db) : ControllerBase
             {
                 var destCity = cityByLabel.TryGetValue(et.DestinationLabel, out var dc)
                     ? dc
-                    : await CityResolver.GetOrCreateAsync(db, et.DestinationLabel);
+                    : await cityResolver.GetOrCreateAsync(et.DestinationLabel);
 
                 var trip = new Trip
                 {
